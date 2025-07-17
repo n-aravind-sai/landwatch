@@ -5,19 +5,23 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 
 interface Document {
-  id: string;
-  name: string;
-  type: 'deed' | 'survey' | 'tax' | 'permit' | 'other';
   size: string;
-  uploadDate: string;
-  plotName: string;
+  id: string;
+  _id: string;
+  plotId: string;
+  userId: string;
+  name: string;
+  fileName?: string;
+  fileUrl: string;
+  type?: string;
   description?: string;
+  uploadedAt?: string;
 }
 
 interface UploadForm {
@@ -25,6 +29,12 @@ interface UploadForm {
   type: string;
   plotName: string;
   description: string;
+}
+
+// For API responses, define types
+interface Plot {
+  id: string;
+  name: string;
 }
 
 const Documents = () => {
@@ -44,15 +54,24 @@ const Documents = () => {
   const [docToDelete, setDocToDelete] = useState<Document | null>(null);
   const [docToEdit, setDocToEdit] = useState<Document | null>(null);
   const [editDocData, setEditDocData] = useState({ name: '', description: '' });
-  const [plots, setPlots] = useState<{ id: string; name: string }[]>([]);
+  const [plots, setPlots] = useState<Plot[]>([]);
 
   useEffect(() => {
     const fetchDocuments = async () => {
       try {
         const token = localStorage.getItem('landwatch_token');
         const res = await fetch('/api/documents', { headers: { Authorization: `Bearer ${token}` } });
-        const data = await res.json();
-        setDocuments(data);
+        const docsData = await res.json();
+        if (!Array.isArray(docsData)) throw new Error('Invalid documents response');
+        setDocuments((docsData as unknown[]).map((doc) => {
+          const d = doc as Partial<Document>;
+          return {
+            ...d,
+            id: d._id as string,
+            name: d.fileName ?? d.name ?? '',
+            uploadDate: d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString() : '',
+          } as Document;
+        }));
       } catch (err) {
         toast({ title: 'Failed to load documents', variant: 'destructive' });
       }
@@ -61,8 +80,15 @@ const Documents = () => {
       try {
         const token = localStorage.getItem('landwatch_token');
         const res = await fetch('/api/plots', { headers: { Authorization: `Bearer ${token}` } });
-        const data = await res.json();
-        setPlots(data.map((plot: any) => ({ id: plot._id || plot.id, name: plot.name })));
+        const plotsData = await res.json();
+        if (!Array.isArray(plotsData)) throw new Error('Invalid plots response');
+        setPlots((plotsData as unknown[]).map((plot) => {
+          const p = plot as Partial<Plot> & { _id?: string };
+          return {
+            id: p._id ?? p.id ?? '',
+            name: p.name ?? '',
+          } as Plot;
+        }));
       } catch (err) {
         // ignore for now
       }
@@ -72,15 +98,21 @@ const Documents = () => {
   }, [toast]);
 
   const filteredDocuments = documents.filter(doc => {
-    const matchesSearch = doc.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         doc.plotName.toLowerCase().includes(searchTerm.toLowerCase());
+    const name = doc.name || '';
+    const plot = plots.find(p => p.id === doc.plotId);
+    const plotName = plot ? plot.name : '';
+    const matchesSearch =
+      name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      plotName.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = selectedType === 'all' || doc.type === selectedType;
-    const matchesPlot = selectedPlot === 'all' || doc.plotName === selectedPlot;
-    
+    const matchesPlot = selectedPlot === 'all' || plotName === selectedPlot;
     return matchesSearch && matchesType && matchesPlot;
   });
 
-  const uniquePlots = [...new Set(documents.map(doc => doc.plotName))];
+  const uniquePlots = [...new Set(documents.map(doc => {
+    const plot = plots.find(p => p.id === doc.plotId);
+    return plot ? plot.name : '';
+  }))].filter(Boolean);
 
   const getFileIcon = (type: string) => {
     switch (type) {
@@ -152,38 +184,56 @@ const Documents = () => {
       const formData = new FormData();
       formData.append('file', uploadForm.file);
       formData.append('type', uploadForm.type);
-      formData.append('plotId', uploadForm.plotName); // plotName now holds the plot ID
+      formData.append('plotId', uploadForm.plotName);
       formData.append('description', uploadForm.description);
       const res = await fetch('/api/documents/upload', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         body: formData
       });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.message || 'Failed to upload document');
+      let newDoc;
+      try {
+        newDoc = await res.json();
+      } catch (jsonErr) {
+        throw new Error('Server error: could not parse response');
       }
-      const newDoc = await res.json();
-      setDocuments(prev => [...prev, newDoc]);
+      if (!res.ok) {
+        throw new Error(newDoc.message || 'Failed to upload document');
+      }
+      setDocuments(prev => [...prev, { ...newDoc, id: newDoc._id || newDoc.id }]);
       toast({
         title: "Document Uploaded",
         description: `${uploadForm.file.name} has been uploaded successfully.`,
       });
-      setIsUploading(false);
       setUploadForm({ file: null, type: '', plotName: '', description: '' });
     } catch (err: any) {
+      console.error(err);
       toast({ title: 'Upload Failed', description: err.message || 'Failed to upload document', variant: 'destructive' });
+    } finally {
       setIsUploading(false);
     }
   };
 
-  const handleDownload = (doc: Document) => {
-    // Here you would typically download from your backend
-    console.log('Downloading document:', doc.id);
-    toast({
-      title: "Download Started",
-      description: `Downloading ${doc.name}...`,
-    });
+  const handleDownload = async (doc: Document) => {
+    if (!doc.id) return;
+    const token = localStorage.getItem('landwatch_token');
+    try {
+      const res = await fetch(`/api/documents/download/${doc.id}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) throw new Error('Failed to download');
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.name || 'document';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast({ title: 'Download Failed', description: (err as Error).message, variant: 'destructive' });
+    }
   };
 
   const handleEditDocument = (doc: Document) => {
@@ -192,11 +242,11 @@ const Documents = () => {
   };
 
   const handleUpdateDocument = async () => {
-    if (!docToEdit) return;
+    if (!docToEdit || !docToEdit._id) return;
     try {
       setIsUploading(true);
       const token = localStorage.getItem('landwatch_token');
-      const res = await fetch(`/api/documents/${docToEdit.id}`, {
+      const res = await fetch(`/api/documents/${docToEdit._id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -209,7 +259,7 @@ const Documents = () => {
         throw new Error(data.message || 'Failed to update document');
       }
       const updatedDoc = await res.json();
-      setDocuments(prev => prev.map(d => d.id === updatedDoc.id ? updatedDoc : d));
+      setDocuments(prev => prev.map(d => d._id === updatedDoc._id ? updatedDoc : d));
       toast({ title: 'Document Updated', description: `${updatedDoc.name} was updated successfully.` });
       setDocToEdit(null);
     } catch (err: any) {
@@ -220,14 +270,15 @@ const Documents = () => {
   };
 
   const handleDelete = async (doc: Document) => {
+    if (!doc._id) return;
     setDocToDelete(doc);
   };
 
   const confirmDeleteDocument = async () => {
-    if (!docToDelete) return;
+    if (!docToDelete || !docToDelete._id) return;
     try {
       const token = localStorage.getItem('landwatch_token');
-      const res = await fetch(`/api/documents/${docToDelete.id}`, {
+      const res = await fetch(`/api/documents/${docToDelete._id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -235,12 +286,12 @@ const Documents = () => {
         const data = await res.json();
         throw new Error(data.message || 'Failed to delete document');
       }
-      setDocuments(prev => prev.filter(d => d.id !== docToDelete.id));
-      toast({
-        title: "Document Deleted",
+      setDocuments(prev => prev.filter(d => d._id !== docToDelete._id));
+    toast({
+      title: "Document Deleted",
         description: `${docToDelete.name} has been deleted.`,
-        variant: "destructive",
-      });
+      variant: "destructive",
+    });
       setDocToDelete(null);
     } catch (err: any) {
       toast({ title: 'Delete Failed', description: err.message || 'Failed to delete document', variant: 'destructive' });
@@ -248,8 +299,9 @@ const Documents = () => {
   };
 
   const totalSize = documents.reduce((acc, doc) => {
-    const size = parseFloat(doc.size.replace(/[^\d.]/g, ''));
-    return acc + size;
+    const sizeStr = doc.size || '0';
+    const size = parseFloat(sizeStr.replace(/[^0-9.]/g, ''));
+    return acc + (isNaN(size) ? 0 : size);
   }, 0);
 
   return (
@@ -264,10 +316,6 @@ const Documents = () => {
                 <FolderOpen className="h-3 w-3" />
                 <span>{documents.length} Files</span>
               </Badge>
-              <Badge variant="outline" className="flex items-center space-x-1">
-                <File className="h-3 w-3" />
-                <span>{totalSize.toFixed(1)} MB</span>
-              </Badge>
             </div>
           </div>
           
@@ -278,9 +326,12 @@ const Documents = () => {
                 Upload Document
               </Button>
             </DialogTrigger>
-            <DialogContent className="max-w-md">
+            <DialogContent className="max-w-md" aria-describedby="upload-description">
               <DialogHeader>
                 <DialogTitle>Upload New Document</DialogTitle>
+                <DialogDescription id="upload-description">
+                  Fill in the details and upload your document. All fields marked * are required.
+                </DialogDescription>
               </DialogHeader>
               
               <div className="space-y-4">
@@ -347,8 +398,8 @@ const Documents = () => {
                 
                 <div>
                   <Label htmlFor="doc-plot">Plot Name *</Label>
-                  <Select
-                    value={uploadForm.plotName}
+                  <Select 
+                    value={uploadForm.plotName} 
                     onValueChange={(value) => setUploadForm(prev => ({ ...prev, plotName: value }))}
                   >
                     <SelectTrigger>
@@ -419,8 +470,8 @@ const Documents = () => {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Plots</SelectItem>
-              {uniquePlots.map((plot) => (
-                <SelectItem key={plot} value={plot}>{plot}</SelectItem>
+              {uniquePlots.map((plot, idx) => (
+                <SelectItem key={plot || idx} value={plot}>{plot}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -444,10 +495,10 @@ const Documents = () => {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredDocuments.map((doc) => {
-              const FileIcon = getFileIcon(doc.type);
-              
+              const FileIcon = getFileIcon(doc.type || 'other');
+              const plot = plots.find(p => p.id === doc.plotId);
               return (
-                <Card key={doc.id} className="feature-card hover:shadow-lg transition-all">
+                <Card key={doc.id} className="feature-card hover:shadow-lg transition-all overflow-hidden">
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
                       <div className="flex items-center space-x-3">
@@ -455,52 +506,37 @@ const Documents = () => {
                           <FileIcon className="h-6 w-6 text-primary" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <CardTitle className="text-sm font-medium truncate">{doc.name}</CardTitle>
-                          <p className="text-xs text-muted-foreground">{doc.size}</p>
+                          <CardTitle className="text-sm font-medium truncate">{doc.name || 'Untitled'}</CardTitle>
+                          <p className="text-xs text-muted-foreground">{doc.type || 'Unknown type'}</p>
                         </div>
                       </div>
-                      <Badge variant={getTypeColor(doc.type)} className="text-xs">
-                        {doc.type}
+                      <Badge variant={getTypeColor(doc.type || 'other')} className="text-xs">
+                        {doc.type || 'other'}
                       </Badge>
                     </div>
                   </CardHeader>
-                  
                   <CardContent className="pt-0">
                     <div className="space-y-3">
                       <div className="text-sm">
-                        <p className="text-muted-foreground">Plot: <span className="font-medium text-foreground">{doc.plotName}</span></p>
-                        <p className="text-muted-foreground">Uploaded: <span className="font-medium text-foreground">{doc.uploadDate}</span></p>
+                        <p className="text-muted-foreground">Plot: <span className="font-medium text-foreground">{plot ? plot.name : doc.plotId}</span></p>
+                        <p className="text-muted-foreground">Uploaded: <span className="font-medium text-foreground">{doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString() : 'Unknown'}</span></p>
                         {doc.description && (
                           <p className="text-muted-foreground text-xs mt-2 line-clamp-2">{doc.description}</p>
                         )}
                       </div>
-                      
                       <div className="flex space-x-2">
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          className="flex-1"
-                          onClick={() => handleDownload(doc)}
-                        >
-                          <Download className="h-3 w-3 mr-1" />
-                          Download
-                        </Button>
-                        <Button variant="outline" size="sm">
-                          <Eye className="h-3 w-3" />
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={() => handleEditDocument(doc)}
-                        >
-                          Edit
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="sm" 
-                          onClick={() => handleDelete(doc)}
-                          className="text-destructive hover:text-destructive"
-                        >
+                        {doc.name && (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="flex-1"
+                            onClick={() => handleDownload(doc)}
+                          >
+                            <Download className="h-3 w-3 mr-1" />
+                            Download
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={() => handleDelete(doc)} className="text-destructive hover:text-destructive">
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
@@ -515,7 +551,7 @@ const Documents = () => {
 
       {/* Edit Document Dialog */}
       {docToEdit && (
-        <Dialog open={!!docToEdit} onOpenChange={setDocToEdit}>
+        <Dialog open={!!docToEdit} onOpenChange={(open: boolean) => { if (!open) setDocToEdit(null); }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Edit Document: {docToEdit.name}</DialogTitle>
@@ -555,7 +591,7 @@ const Documents = () => {
 
       {/* Delete Document Confirmation Dialog */}
       {docToDelete && (
-        <Dialog open={!!docToDelete} onOpenChange={setDocToDelete}>
+        <Dialog open={!!docToDelete} onOpenChange={(open: boolean) => { if (!open) setDocToDelete(null); }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Confirm Deletion</DialogTitle>

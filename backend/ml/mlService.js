@@ -1,8 +1,8 @@
+console.log('DEBUG: mlService.js loaded');
 import axios from "axios";
 
-const ML_URL = process.env.ML_SERVICE_URL;
-
 export const checkHealth = async () => {
+  const ML_URL = process.env.ML_SERVICE_URL;
   try {
     const { data } = await axios.get(`${ML_URL}/health-check`, { timeout: 5000 });
     return data;
@@ -11,31 +11,39 @@ export const checkHealth = async () => {
   }
 };
 
-export const runChangeDetection = async (coordinates) => {
+export const runChangeDetection = async (plotId, coordinates) => {
+  const ML_URL = process.env.ML_SERVICE_URL;
   try {
-    const { data } = await axios.post(`${ML_URL}/change-detect`, { coordinates }, { timeout: 10000 });
+    const { data } = await axios.post(`${ML_URL}/change-detect`, { plotId, coordinates }, { timeout: 10000 });
     return data;
   } catch (err) {
     return { change_detected: false, error: err.message };
   }
 };
 
-export const getLatestImage = async (coordinates) => {
+export const getLatestImage = async (plotId, coordinates) => {
+  const ML_URL = process.env.ML_SERVICE_URL;
+  console.log('DEBUG: getLatestImage called');
   try {
-    const { data } = await axios.post(`${ML_URL}/latest-image`, { coordinates }, { timeout: 10000 });
-    // Normalize response for frontend
-    return { imageUrl: data.best_thumbnail_url || data.imageUrl || data.url || null, ...data };
+    console.log('DEBUG: About to call ML service');
+    const { data } = await axios.post(`${ML_URL}/latest-image`, { plotId, coordinates }, { timeout: 10000 });
+    console.log('ML Service /latest-image response:', data); // Debug log
+    return { imageUrl: data.best_thumbnail_url || null };
   } catch (err) {
+    console.log('DEBUG: Error calling ML service:', err);
     return { error: err.message };
   }
 };
 
-export const downloadLatestImage = async (coordinates) => {
+export const downloadLatestImage = async (plotId, coordinates) => {
+  const ML_URL = process.env.ML_SERVICE_URL;
+  console.log('DEBUG: downloadLatestImage called');
   try {
-    const response = await axios.post(`${ML_URL}/download-latest-image`, { coordinates }, {
-      responseType: "stream",
+    const response = await axios.post(`${ML_URL}/download-latest-image`, { plotId, coordinates }, {
+      responseType: "json",
       timeout: 20000
     });
+    console.log('ML Service /download-latest-image response:', response.data); // Debug log
     return response.data;
   } catch (err) {
     throw new Error("Download failed: " + err.message);

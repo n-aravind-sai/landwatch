@@ -156,13 +156,13 @@ def get_latest_image_info(polygon_coords: list, relax_mask=True, apply_mask=True
 
 def get_latest_image_download_url(polygon_coords: list, relax_mask=True, apply_mask=True) -> dict:
     """
-    Returns download URLs for the 3 most recent cloud-free Sentinel-2 images for the given coordinates, cloud-masked, at native resolution (GeoTIFF).
+    Returns the download URL for the most recent cloud-free Sentinel-2 image for the given coordinates, cloud-masked, at native resolution (GeoTIFF).
     Args:
         polygon_coords (list): Coordinates for the AOI polygon.
         relax_mask (bool): If True, only mask clouds and shadows. If False, mask more classes.
         apply_mask (bool): If False, do not apply any mask (debugging).
     Returns:
-        dict: List of download URLs for the 3 most recent cloud-free images.
+        dict: The download URL for the most recent cloud-free image.
     """
     try:
         aoi = ee.Geometry.Polygon(polygon_coords)
@@ -172,25 +172,19 @@ def get_latest_image_download_url(polygon_coords: list, relax_mask=True, apply_m
             .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 40))
             .sort('system:time_start', False)
         )
-        images = collection.toList(3)
-        results = []
-        for i in range(3):
-            img = ee.Image(images.get(i))
-            masked = mask_s2_clouds_shadows(img, aoi, relax_mask=relax_mask, apply_mask=apply_mask)
-            info = img.getInfo()
-            url = masked.getDownloadURL({
-                'scale': 10,
-                'region': aoi,
-                'format': 'GEO_TIFF',
-                'bands': ['B4', 'B3', 'B2']
-            })
-            results.append({
-                'id': info.get('id'),
-                'date': info['properties'].get('DATATAKE_IDENTIFIER'),
-                'bands': [b['id'] for b in info['bands']],
-                'properties': info['properties'],
-                'download_url': url
-            })
-        return {'images': results}
+        images = collection.toList(1)
+        if images.size().getInfo() == 0:
+            return {'download_url': None, 'error': 'No recent cloud-free images found.'}
+        img = ee.Image(images.get(0))
+        masked = mask_s2_clouds_shadows(img, aoi, relax_mask=relax_mask, apply_mask=apply_mask)
+        url = masked.getDownloadURL({
+            'scale': 10,
+            'region': aoi,
+            'format': 'GEO_TIFF',
+            'bands': ['B4', 'B3', 'B2'],
+            'min': 0,
+            'max': 3000
+        })
+        return {'download_url': url}
     except Exception as e:
         return {'error': str(e)}

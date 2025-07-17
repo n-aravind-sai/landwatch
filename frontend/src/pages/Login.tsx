@@ -27,7 +27,7 @@ const Login = () => {
       if (res.ok && data.token) {
         localStorage.setItem('landwatch_token', data.token);
         toast({ title: 'Login successful', description: 'Welcome back to LandWatch!' });
-        window.location.href = '/dashboard';
+      window.location.href = '/dashboard';
       } else {
         toast({ title: 'Login failed', description: data.message || 'Invalid credentials', variant: 'destructive' });
       }

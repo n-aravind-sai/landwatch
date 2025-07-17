@@ -33,7 +33,7 @@ function toGeoJsonPolygon(coordinates) {
 export const changeDetect = async (req, res) => {
   const { coordinates, plotId } = req.body;
   const geojsonCoords = toGeoJsonPolygon(coordinates);
-  const result = await runChangeDetection(geojsonCoords);
+  const result = await runChangeDetection(plotId, geojsonCoords);
   if (result.change_detected) {
     const alert = await Alert.create({
       plotId,
@@ -47,15 +47,15 @@ export const changeDetect = async (req, res) => {
 };
 
 export const latestImage = async (req, res) => {
-  const { coordinates } = req.body;
+  const { coordinates, plotId } = req.body;
   const geojsonCoords = toGeoJsonPolygon(coordinates);
-  const image = await getLatestImage(geojsonCoords);
+  const image = await getLatestImage(plotId, geojsonCoords);
   res.json(image);
 };
 
 export const downloadLatestImage = async (req, res) => {
-  const { coordinates } = req.body;
+  const { coordinates, plotId } = req.body;
   const geojsonCoords = toGeoJsonPolygon(coordinates);
-  const fileStream = await mlDownloadLatestImage(geojsonCoords);
-  fileStream.pipe(res);
+  const result = await mlDownloadLatestImage(plotId, geojsonCoords);
+  res.json(result); // Send the download_url as JSON
 }; 

@@ -28,7 +28,7 @@ const Register = () => {
       if (res.ok && data.token) {
         localStorage.setItem('landwatch_token', data.token);
         toast({ title: 'Registration successful', description: 'Welcome to LandWatch! Your account has been created.' });
-        window.location.href = '/dashboard';
+      window.location.href = '/dashboard';
       } else {
         toast({ title: 'Registration failed', description: data.message || 'Could not register', variant: 'destructive' });
       }

@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Trash2, Eye } from 'lucide-react';
+import { Trash2, Eye, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface Plot {
@@ -25,7 +25,7 @@ const AllPlots = () => {
 
   // Helper to convert [lat, lng] to GeoJSON [[[lng, lat], ...]]
   function toGeoJsonPolygon(coords: [number, number][]) {
-    let ring = coords.map(([lat, lng]) => [lng, lat]);
+    const ring = coords.map(([lat, lng]) => [lng, lat]);
     if (ring.length < 3 || ring[0][0] !== ring[ring.length-1][0] || ring[0][1] !== ring[ring.length-1][1]) {
       ring.push([...ring[0]]);
     }
@@ -40,8 +40,12 @@ const AllPlots = () => {
         const res = await fetch('/api/plots', { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
         // Map _id to id for frontend consistency
-        setPlots(data.map((plot: any) => ({ ...plot, id: plot._id })));
-      } catch (err) {
+        setPlots((data as { _id: string; name: string; coordinates: [number, number][] }[]).map(plot => ({
+          id: plot._id,
+          name: plot.name,
+          coordinates: plot.coordinates,
+        })));
+      } catch (err: unknown) {
         setError('Failed to load plots');
       } finally {
         setLoading(false);
@@ -73,8 +77,9 @@ const AllPlots = () => {
         variant: 'destructive',
       });
       setPlotToDelete(null);
-    } catch (err: any) {
-      toast({ title: 'Delete Failed', description: err.message || 'Failed to delete plot', variant: 'destructive' });
+    } catch (err: unknown) {
+      const message = (typeof err === 'object' && err && 'message' in err) ? (err as { message?: string }).message : undefined;
+      toast({ title: 'Delete Failed', description: message || 'Failed to delete plot', variant: 'destructive' });
     }
   };
 
@@ -91,7 +96,7 @@ const AllPlots = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ coordinates: toGeoJsonPolygon(plot.coordinates) })
+        body: JSON.stringify({ plotId: plot.id, coordinates: toGeoJsonPolygon(plot.coordinates) })
       });
       if (!res.ok) {
         const data = await res.json();
@@ -103,8 +108,40 @@ const AllPlots = () => {
       if (!data.imageUrl && !data.url && !data.thumbnail) {
         setMlError('No image available');
       }
-    } catch (err: any) {
-      setMlError(err.message || 'Failed to fetch image');
+    } catch (err: unknown) {
+      const message = (typeof err === 'object' && err && 'message' in err) ? (err as { message?: string }).message : undefined;
+      setMlError(message || 'Failed to fetch image');
+    } finally {
+      setMlLoading(false);
+    }
+  };
+
+  const handleDownloadLatestImage = async (plot: Plot) => {
+    setMlError('');
+    setMlLoading(true);
+    try {
+      const token = localStorage.getItem('landwatch_token');
+      const res = await fetch('/api/ml/download-latest-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ plotId: plot.id, coordinates: toGeoJsonPolygon(plot.coordinates) })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || data.message || 'Failed to fetch download link');
+      }
+      const data = await res.json();
+      if (data.download_url) {
+        window.open(data.download_url, '_blank');
+      } else {
+        toast({ title: 'No Download Available', description: 'No download link available for this plot.', variant: 'destructive' });
+      }
+    } catch (err: unknown) {
+      const message = (typeof err === 'object' && err && 'message' in err) ? (err as { message?: string }).message : undefined;
+      toast({ title: 'Download Failed', description: message || 'Failed to fetch download link', variant: 'destructive' });
     } finally {
       setMlLoading(false);
     }
@@ -127,6 +164,9 @@ const AllPlots = () => {
                 <div className="flex gap-2">
                   <Button variant="outline" size="icon" onClick={() => handleViewPlot(plot)} title="View Plot">
                     <Eye className="h-5 w-5" />
+                  </Button>
+                  <Button variant="outline" size="icon" onClick={() => handleDownloadLatestImage(plot)} title="Download Latest Image">
+                    <Download className="h-5 w-5" />
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => handleDelete(plot)} className="text-destructive hover:text-destructive">
                     <Trash2 className="h-5 w-5" />
@@ -151,7 +191,7 @@ const AllPlots = () => {
       )}
       {/* View Plot Dialog */}
       {viewPlot && (
-        <Dialog open={!!viewPlot} onOpenChange={setViewPlot}>
+        <Dialog open={!!viewPlot} onOpenChange={(open) => { if (!open) setViewPlot(null); }}>
           <DialogContent className="max-w-xl">
             <DialogHeader>
               <DialogTitle>Latest Image for "{viewPlot.name}"</DialogTitle>
@@ -173,7 +213,7 @@ const AllPlots = () => {
       )}
       {/* Delete Plot Confirmation Dialog */}
       {plotToDelete && (
-        <Dialog open={!!plotToDelete} onOpenChange={setPlotToDelete}>
+        <Dialog open={!!plotToDelete} onOpenChange={(open) => { if (!open) setPlotToDelete(null); }}>
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>Confirm Deletion</DialogTitle>

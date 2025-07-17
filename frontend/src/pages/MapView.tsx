@@ -35,9 +35,7 @@ const MAP_ZOOM = 6.5;
 function GeocoderControl() {
   const map = useMap();
   useEffect(() => {
-    // @ts-ignore
     if (!map._geocoderControl) {
-      // @ts-ignore
       const geocoder = L.Control.geocoder({
         defaultMarkGeocode: true
       })
@@ -45,7 +43,6 @@ function GeocoderControl() {
           map.setView(e.geocode.center, 14);
         })
         .addTo(map);
-      // @ts-ignore
       map._geocoderControl = geocoder;
     }
   }, [map]);
@@ -72,8 +69,12 @@ const MapView = () => {
         const token = localStorage.getItem('landwatch_token');
         const res = await fetch('/api/plots', { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
-        setPlots(data.map((plot: any) => ({ ...plot, id: plot._id })));
-      } catch (err) {
+        setPlots((data as { _id: string; name: string; coordinates: [number, number][] }[]).map(plot => ({
+          id: plot._id,
+          name: plot.name,
+          coordinates: plot.coordinates,
+        })));
+      } catch (err: unknown) {
         setError('Failed to load plots');
       } finally {
         setLoading(false);
@@ -104,7 +105,7 @@ const MapView = () => {
     const map = useMap();
     useEffect(() => {
       if (!drawing) return;
-      const handleClick = (e: any) => {
+      const handleClick = (e: L.LeafletMouseEvent) => {
         if (!drawing) return;
         const { lat, lng } = e.latlng;
         setDrawCoords((prev) => [...prev, [lat, lng]]);
@@ -113,7 +114,7 @@ const MapView = () => {
       return () => {
         map.off('click', handleClick);
       };
-    }, [drawing, map]);
+    }, [map]);
     return null;
   }
 
@@ -163,8 +164,9 @@ const MapView = () => {
       toast({ title: 'Plot Created', description: `${createdPlot.name} was added successfully.` });
       setNewPlot({ name: '', coordinates: [] });
       setDrawCoords([]);
-    } catch (err: any) {
-      toast({ title: 'Error', description: err.message || 'Failed to create plot', variant: 'destructive' });
+    } catch (err: unknown) {
+      const message = (typeof err === 'object' && err && 'message' in err) ? (err as { message?: string }).message : undefined;
+      toast({ title: 'Error', description: message || 'Failed to create plot', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
@@ -180,21 +182,22 @@ const MapView = () => {
         </div>
       <div className="flex-1 relative" ref={mapRef}>
         <MapContainer
-          center={MAP_CENTER}
+          center={MAP_CENTER as [number, number]}
           zoom={MAP_ZOOM}
           style={{ height: '100%', width: '100%' }}
-          maxBounds={AP_TG_BOUNDS}
+          maxBounds={AP_TG_BOUNDS as [[number, number], [number, number]]}
           className={drawing ? 'cursor-crosshair' : 'cursor-grab'}
         >
           <GeocoderControl />
           <TileLayer
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            attribution="&copy; OpenStreetMap contributors"
-          />
+          >
+            <span slot="attribution">&copy; OpenStreetMap contributors</span>
+          </TileLayer>
           <MapClickHandler />
           {/* Existing Plots */}
           {plots.map((plot) => (
-            <Polygon key={plot.id || plot._id || plot.name} positions={plot.coordinates} pathOptions={{ color: 'blue' }} />
+            <Polygon key={plot.id || plot.name} positions={plot.coordinates} pathOptions={{ color: 'blue' }} />
           ))}
           {/* Drawing Polygon */}
           {drawing && drawCoords.length > 0 && (
@@ -202,33 +205,33 @@ const MapView = () => {
           )}
         </MapContainer>
         {/* Add Plot Name Dialog */}
-        <Dialog open={isAddingPlot} onOpenChange={setIsAddingPlot}>
+          <Dialog open={isAddingPlot} onOpenChange={(open) => { if (!open) setIsAddingPlot(false); }}>
           <DialogContent className="max-w-md z-[9999]">
-            <DialogHeader>
-              <DialogTitle>Add New Plot</DialogTitle>
-            </DialogHeader>
+              <DialogHeader>
+                <DialogTitle>Add New Plot</DialogTitle>
+              </DialogHeader>
             <div className="space-y-4">
-              <Label htmlFor="plot-name">Plot Name</Label>
-              <Input
-                id="plot-name"
-                value={newPlot.name}
-                onChange={(e) => setNewPlot(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="Enter plot name"
-              />
-              <div className="flex space-x-2 pt-4">
+                    <Label htmlFor="plot-name">Plot Name</Label>
+                    <Input
+                      id="plot-name"
+                      value={newPlot.name}
+                      onChange={(e) => setNewPlot(prev => ({ ...prev, name: e.target.value }))}
+                      placeholder="Enter plot name"
+                    />
+                  <div className="flex space-x-2 pt-4">
                 <Button onClick={handleNameNext} className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 flex-1">
                   Next
-                </Button>
+                    </Button>
                 <Button variant="outline" onClick={() => { setIsAddingPlot(false); setDrawing(false); setDrawCoords([]); setNewPlot({ name: '', coordinates: [] }); }}>
-                  Cancel
-                </Button>
-              </div>
+                      Cancel
+                    </Button>
+                  </div>
               <div className="text-xs text-muted-foreground">
                 After entering a name, you will be able to draw your plot on the map.
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+                        </div>
+                      </div>
+            </DialogContent>
+          </Dialog>
         {/* Drawing Controls */}
         {drawing && (
           <div className="absolute top-4 left-4 bg-card border border-border rounded-lg p-3 shadow-lg z-[9999]">
