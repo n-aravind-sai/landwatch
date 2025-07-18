@@ -43,7 +43,6 @@ async function run() {
       if (percentChange > 30) severity = 'high';
       else if (percentChange > 15) severity = 'medium';
       else if (percentChange > 5) severity = 'low';
-      else continue;
       // Deduplication: check for similar alert in last 24h
       const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
       const existing = await Alert.findOne({
@@ -61,11 +60,14 @@ async function run() {
           type: 'change',
           severity,
           percentChange,
-          source: 'automated'
+          source: 'automated',
+          status: 'unread',
+          title: 'Change Detection',
+          description: 'Automated detection run'
         });
         // Fetch user email
         const user = await User.findById(plot.userId);
-        if (user && user.email) {
+        if (user && user.email && percentChange > 0) {
           await sendAlertEmail(user.email, plot.name, percentChange, severity);
           console.log(`Alert email sent to ${user.email} for plot ${plot.name}`);
         }

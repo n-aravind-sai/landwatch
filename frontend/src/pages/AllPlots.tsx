@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Trash2, Eye, Download, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useNavigate } from 'react-router-dom';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface Plot {
   id: string;
@@ -26,6 +27,14 @@ const AllPlots = () => {
   const navigate = useNavigate();
   const [detectingPlotId, setDetectingPlotId] = useState<string | null>(null);
   const [lastDetections, setLastDetections] = useState<Record<string, { time: string; percentChange: number; severity: string }>>({});
+  const [detectDialogOpen, setDetectDialogOpen] = useState(false);
+  const [detectPlot, setDetectPlot] = useState<Plot | null>(null);
+  const [detectThreshold, setDetectThreshold] = useState(0.2);
+  const [detectDays, setDetectDays] = useState(20);
+  const [detectRelaxMask, setDetectRelaxMask] = useState(false);
+  const [detectApplyMask, setDetectApplyMask] = useState(true);
+  const [detectResult, setDetectResult] = useState<string | null>(null);
+  const [detectError, setDetectError] = useState<string | null>(null);
 
   // Helper to convert [lat, lng] to GeoJSON [[[lng, lat], ...]]
   function toGeoJsonPolygon(coords: [number, number][]) {
@@ -176,30 +185,50 @@ const AllPlots = () => {
     }
   };
 
-  const handleManualDetect = async (plot: Plot) => {
-    setDetectingPlotId(plot.id);
+  const openDetectDialog = (plot: Plot) => {
+    setDetectPlot(plot);
+    setDetectThreshold(0.2);
+    setDetectDays(20);
+    setDetectRelaxMask(false);
+    setDetectApplyMask(true);
+    setDetectResult(null);
+    setDetectError(null);
+    setDetectDialogOpen(true);
+  };
+
+  const handleManualDetect = async () => {
+    if (!detectPlot) return;
+    setDetectingPlotId(detectPlot.id);
+    setDetectResult(null);
+    setDetectError(null);
     try {
       const token = localStorage.getItem('landwatch_token');
-      const res = await fetch(`/api/plots/${plot.id}/detect-change`, {
+      const res = await fetch(`/api/plots/${detectPlot.id}/detect-change`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          threshold: detectThreshold,
+          days: detectDays,
+          relax_mask: detectRelaxMask,
+          apply_mask: detectApplyMask
+        })
       });
       const data = await res.json();
       if (res.ok) {
-        alert(data.message || `Change detected: ${data.percentChange}%`);
+        setDetectResult(data.message || `Change detected: ${data.percentChange ?? 0}%`);
         // Optionally refresh last detections
         const newLast = { ...lastDetections };
-        newLast[plot.id] = {
+        newLast[detectPlot.id] = {
           time: new Date().toISOString(),
           percentChange: data.percentChange ?? 0,
           severity: data.alert?.severity || 'low'
         };
         setLastDetections(newLast);
       } else {
-        alert(data.message || 'Failed to detect change');
+        setDetectError(data.message || 'Failed to detect change');
       }
     } catch (err: any) {
-      alert(err.message || 'Failed to detect change');
+      setDetectError(err.message || 'Failed to detect change');
     } finally {
       setDetectingPlotId(null);
     }
@@ -226,7 +255,7 @@ const AllPlots = () => {
                   <Button variant="outline" size="icon" onClick={() => handleDownloadLatestImage(plot)} title="Download Latest Image">
                     <Download className="h-5 w-5" />
                   </Button>
-                  <Button variant="outline" size="icon" onClick={() => handleManualDetect(plot)} disabled={!!detectingPlotId} title="Manual Detect Change">
+                  <Button variant="outline" size="icon" onClick={() => openDetectDialog(plot)} disabled={!!detectingPlotId} title="Manual Detect Change">
                     {detectingPlotId === plot.id ? <span className="animate-spin">⏳</span> : <AlertTriangle className="h-5 w-5" />}
                   </Button>
                   <Button variant="ghost" size="icon" onClick={() => handleDelete(plot)} className="text-destructive hover:text-destructive">
@@ -306,6 +335,42 @@ const AllPlots = () => {
               <Button variant="destructive" onClick={confirmDeletePlot}>
                 Delete
               </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+      {/* Manual Detect Change Dialog */}
+      {detectDialogOpen && detectPlot && (
+        <Dialog open={detectDialogOpen} onOpenChange={setDetectDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Manual Change Detection for "{detectPlot.name}"</DialogTitle>
+              <DialogDescription>
+                Set advanced options for change detection. Adjust these only if you know what they mean.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium">NDVI Threshold</label>
+                <input type="number" step="0.01" min="0" max="1" value={detectThreshold} onChange={e => setDetectThreshold(Number(e.target.value))} className="input input-bordered w-full" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium">Days to Look Back</label>
+                <input type="number" min="1" max="90" value={detectDays} onChange={e => setDetectDays(Number(e.target.value))} className="input input-bordered w-full" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox checked={detectRelaxMask} onCheckedChange={v => setDetectRelaxMask(!!v)} id="relax-mask" />
+                <label htmlFor="relax-mask" className="text-sm">Relax Mask (only mask clouds/shadows)</label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox checked={detectApplyMask} onCheckedChange={v => setDetectApplyMask(!!v)} id="apply-mask" />
+                <label htmlFor="apply-mask" className="text-sm">Apply Mask (disable for debugging)</label>
+              </div>
+              <Button onClick={handleManualDetect} disabled={!!detectingPlotId} className="w-full">
+                {detectingPlotId === detectPlot.id ? 'Detecting...' : 'Run Detection'}
+              </Button>
+              {detectResult && <div className="text-green-600 text-sm">{detectResult}</div>}
+              {detectError && <div className="text-red-600 text-sm">{detectError}</div>}
             </div>
           </DialogContent>
         </Dialog>

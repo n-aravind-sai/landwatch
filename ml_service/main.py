@@ -10,10 +10,21 @@ init_gee()
 def detect(request: DetectRequest):
     """
     Detects change in the provided plot coordinates using NDVI.
+    Parameters:
+      - threshold: NDVI change threshold (default 0.2)
+      - days: Number of days to look back (default 20)
+      - relax_mask: If true, only mask clouds and shadows (default False)
+      - apply_mask: If false, disables masking (default True)
     Returns change area and polygons if detected.
     """
     try:
-        result = detect_change(request.coordinates)
+        result = detect_change(
+            request.coordinates,
+            threshold=request.threshold,
+            days=request.days,
+            relax_mask=request.relax_mask,
+            apply_mask=request.apply_mask
+        )
         return {
             "plotId": request.plotId,
             **result

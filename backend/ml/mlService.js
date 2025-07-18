@@ -11,10 +11,23 @@ export const checkHealth = async () => {
   }
 };
 
-export const runChangeDetection = async (plotId, coordinates) => {
+export const runChangeDetection = async (plotId, coordinates, options = {}) => {
   const ML_URL = process.env.ML_SERVICE_URL;
+  const {
+    threshold = 0.2,
+    days = 20,
+    relax_mask = false,
+    apply_mask = true
+  } = options;
   try {
-    const { data } = await axios.post(`${ML_URL}/change-detect`, { plotId, coordinates }, { timeout: 10000 });
+    const { data } = await axios.post(`${ML_URL}/detect-change`, {
+      plotId,
+      coordinates,
+      threshold,
+      days,
+      relax_mask,
+      apply_mask
+    }, { timeout: 10000 });
     return data;
   } catch (err) {
     return { change_detected: false, error: err.message };

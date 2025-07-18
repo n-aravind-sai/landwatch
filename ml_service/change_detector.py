@@ -1,6 +1,23 @@
 import ee  # ✅ Import only ee
 import math
 
+# Improved SCL-based cloud/shadow/snow masking for Sentinel-2
+SCL_CLOUD_CLASSES = [3, 7, 8, 9, 10, 11]  # 3=Shadow, 7=Unclassified, 8=Cloud medium, 9=Cloud high, 10=Thin cirrus, 11=Snow
+
+def mask_s2_clouds_shadows(img, aoi, relax_mask=True, apply_mask=True):
+    scl = img.select('SCL')
+    if not apply_mask:
+        return img.clip(aoi)
+    if relax_mask:
+        # Only mask clouds (8, 9, 10) and shadows (3)
+        mask = scl.neq(3).And(scl.neq(8)).And(scl.neq(9)).And(scl.neq(10))
+    else:
+        # Mask clouds, shadows, snow, unclassified
+        mask = ee.Image(1)
+        for val in SCL_CLOUD_CLASSES:
+            mask = mask.And(scl.neq(val))
+    return img.updateMask(mask).clip(aoi)
+
 def compute_ndvi(img: ee.image.Image) -> ee.image.Image:
     """
     Computes the NDVI for a given Sentinel-2 image.
@@ -14,76 +31,81 @@ def compute_ndvi(img: ee.image.Image) -> ee.image.Image:
 def detect_change(
     polygon_coords: list,
     threshold: float = 0.2,
-    days: int = 20
+    days: int = 20,
+    relax_mask: bool = False,
+    apply_mask: bool = True
 ) -> dict:
     """
-    Detects NDVI change in a given polygon area over the specified number of days.
-    Args:
-        polygon_coords (list): Coordinates for the AOI polygon.
-        threshold (float): NDVI change threshold.
-        days (int): Number of days to look back.
-    Returns:
-        dict: Change detection results.
+    Improved: Uses median composites for before/after, robust SCL masking, and exposes params.
     """
     try:
         aoi = ee.Geometry.Polygon(polygon_coords)
-        today = ee.Date(ee.Date.now())  # type: ignore
+        today = ee.Date(ee.Date.now())
         before = today.advance(-days, 'day')
 
-        # ✅ Use better cloud masking if needed
-        def mask_clouds(img):
-            qa = img.select('QA60')
-            return img.updateMask(qa.bitwiseAnd(1 << 10).eq(0))
+        def add_mask(img):
+            return mask_s2_clouds_shadows(img, aoi, relax_mask=relax_mask, apply_mask=apply_mask)
 
-        # ✅ ImageCollection with ignore
         collection = (
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
             .filterBounds(aoi)
             .filterDate(before, today)
-            .map(mask_clouds)
+            .map(add_mask)
         )
-
-        # ✅ Check image count
+        # Check image count
         if collection.size().getInfo() < 2:
             return {
                 "change_detected": False,
                 "change_area": 0,
                 "change_geojson": {},
-                "bounding_box": aoi.bounds().getInfo().get("coordinates", [])
+                "bounding_box": aoi.bounds().getInfo().get("coordinates", []),
+                "percentChange": 0,
+                "type": "change"
             }
-
-        # ✅ Select earliest and latest images
-        images = collection.sort("system:time_start").toList(2)
-        img1 = ee.Image(images.get(0))  # type: ignore
-        img2 = ee.Image(images.get(1))  # type: ignore
-
+        # Use median composite for before/after
+        mid = before.advance(days // 2, 'day')
+        before_coll = collection.filterDate(before, mid)
+        after_coll = collection.filterDate(mid, today)
+        if before_coll.size().getInfo() == 0 or after_coll.size().getInfo() == 0:
+            return {
+                "change_detected": False,
+                "change_area": 0,
+                "change_geojson": {},
+                "bounding_box": aoi.bounds().getInfo().get("coordinates", []),
+                "percentChange": 0,
+                "type": "change"
+            }
+        img1 = before_coll.median()
+        img2 = after_coll.median()
         ndvi1 = compute_ndvi(img1)
         ndvi2 = compute_ndvi(img2)
+        # Calculate mean NDVI change over AOI
+        mean1 = ndvi1.reduceRegion(ee.Reducer.mean(), aoi, 10).get('NDVI').getInfo() or 0
+        mean2 = ndvi2.reduceRegion(ee.Reducer.mean(), aoi, 10).get('NDVI').getInfo() or 0
+        percent_change = round(abs(mean2 - mean1) * 100, 2)
         delta = ndvi2.subtract(ndvi1).abs().gt(threshold)
-
-        # ✅ Convert raster difference to vector polygons
-        vectors = delta.selfMask().reduceToVectors({  # type: ignore
+        # Convert raster difference to vector polygons
+        vectors = delta.selfMask().reduceToVectors({
             "geometry": aoi,
             "scale": 10,
             "geometryType": "polygon",
             "eightConnected": False,
             "maxPixels": 1e8
         })
-
         geojson_data = vectors.getInfo()
         features = geojson_data.get("features", [])
         num_changes = len(features)
-
         total_area = sum([
             ee.Geometry(f["geometry"]).area().getInfo() or 0
             for f in features
         ])
-
         return {
             "change_detected": num_changes > 0,
             "change_area": round(total_area / 10_000, 4),  # in hectares
             "change_geojson": geojson_data,
-            "bounding_box": aoi.bounds().getInfo().get("coordinates", [])
+            "bounding_box": aoi.bounds().getInfo().get("coordinates", []),
+            "percentChange": percent_change,
+            "type": "change"
         }
     except Exception as e:
         return {
@@ -91,20 +113,10 @@ def detect_change(
             "change_area": 0,
             "change_geojson": {},
             "bounding_box": [],
-            "error": str(e)
+            "error": str(e),
+            "percentChange": 0,
+            "type": "change"
         }
-
-def mask_s2_clouds_shadows(img, aoi, relax_mask=True, apply_mask=True):
-    scl = img.select('SCL')
-    if not apply_mask:
-        return img.clip(aoi)
-    if relax_mask:
-        # Only mask clouds (8, 9, 10) and shadows (3)
-        mask = scl.neq(3).And(scl.neq(8)).And(scl.neq(9)).And(scl.neq(10))
-    else:
-        # Mask clouds, shadows, snow, unclassified
-        mask = scl.neq(3).And(scl.neq(7)).And(scl.neq(8)).And(scl.neq(9)).And(scl.neq(10)).And(scl.neq(11))
-    return img.updateMask(mask).clip(aoi)
 
 def get_latest_image_info(polygon_coords: list, relax_mask=True, apply_mask=True) -> dict:
     """

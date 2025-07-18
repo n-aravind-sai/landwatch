@@ -17,7 +17,9 @@ interface Alert {
   description: string;
   plotName: string;
   timestamp: string;
-  status: 'unread' | 'acknowledged' | 'resolved';
+  status: 'unread' | 'read' | 'resolved';
+  percentChange: number;
+  source: string;
   coordinates?: string;
 }
 
@@ -46,7 +48,9 @@ const Alerts = () => {
       try {
         const token = localStorage.getItem('landwatch_token');
         const res = await fetch('/api/alerts', { headers: { Authorization: `Bearer ${token}` } });
-        const data = await res.json();
+        let data = await res.json();
+        // Map _id to id for frontend consistency
+        data = data.map((alert: any) => ({ ...alert, id: alert._id || alert.id }));
         setAlerts(data);
       } catch (err) {
         setError('Failed to load alerts');
@@ -114,7 +118,7 @@ const Alerts = () => {
     switch (status) {
       case 'unread':
         return 'destructive';
-      case 'acknowledged':
+      case 'read':
         return 'secondary';
       case 'resolved':
         return 'default';
@@ -123,9 +127,24 @@ const Alerts = () => {
     }
   };
 
-  const handleAcknowledge = (alertId: string) => {
-    // Here you would update the alert status in the backend
-    console.log('Acknowledging alert:', alertId);
+  const handleAcknowledge = async (alertId: string) => {
+    // Update the alert status in the backend and UI
+    try {
+      const token = localStorage.getItem('landwatch_token');
+      const res = await fetch(`/api/alerts/${alertId}/acknowledge`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: 'read' })
+      });
+      if (res.ok) {
+        setAlerts(prev => prev.map(a => a.id === alertId ? { ...a, status: 'read' } : a));
+        toast({ title: 'Alert Acknowledged', description: 'This alert has been marked as read.' });
+      } else {
+        toast({ title: 'Acknowledge Failed', description: 'Could not acknowledge alert.', variant: 'destructive' });
+      }
+    } catch (err) {
+      toast({ title: 'Acknowledge Error', description: 'Could not acknowledge alert.', variant: 'destructive' });
+    }
   };
 
   const handleResolve = (alertId: string) => {
@@ -152,7 +171,9 @@ const Alerts = () => {
           // re-fetch alerts
           const token = localStorage.getItem('landwatch_token');
           const res = await fetch('/api/alerts', { headers: { Authorization: `Bearer ${token}` } });
-          const data = await res.json();
+          let data = await res.json();
+          // Map _id to id for frontend consistency
+          data = data.map((alert: any) => ({ ...alert, id: alert._id || alert.id }));
           setAlerts(data);
         }
       } else {
@@ -210,9 +231,6 @@ const Alerts = () => {
               </Badge>
             </div>
           </div>
-          <Button onClick={() => setDetectDialogOpen(true)} variant="earth">
-            Detect Change
-          </Button>
         </div>
 
         {/* Filters */}
@@ -246,7 +264,7 @@ const Alerts = () => {
             <SelectContent>
               <SelectItem value="all">All Status</SelectItem>
               <SelectItem value="unread">Unread</SelectItem>
-              <SelectItem value="acknowledged">Acknowledged</SelectItem>
+              <SelectItem value="read">Read</SelectItem>
               <SelectItem value="resolved">Resolved</SelectItem>
             </SelectContent>
           </Select>
@@ -379,20 +397,6 @@ const Alerts = () => {
                                 Acknowledge
                               </Button>
                             )}
-                            {alert.status !== 'resolved' && (
-                              <Button 
-                                variant="default" 
-                                size="sm"
-                                onClick={() => handleResolve(alert.id)}
-                                className="btn-earth"
-                              >
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Resolve
-                              </Button>
-                            )}
-                            <Button variant="outline" size="sm">
-                              View on Map
-                            </Button>
                           </div>
                         </div>
                       </CardContent>

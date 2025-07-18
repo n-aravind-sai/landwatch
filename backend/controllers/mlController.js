@@ -31,30 +31,31 @@ function toGeoJsonPolygon(coordinates) {
 }
 
 export const changeDetect = async (req, res) => {
-  const { coordinates, plotId } = req.body;
+  const { coordinates, plotId, threshold = 0.2, days = 20, relax_mask = false, apply_mask = true } = req.body;
   const geojsonCoords = toGeoJsonPolygon(coordinates);
-  const result = await runChangeDetection(plotId, geojsonCoords);
-  if (result.change_detected) {
-    // Deduplication: check for similar alert in last 24h
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const existing = await Alert.findOne({
+  const result = await runChangeDetection(plotId, geojsonCoords, { threshold, days, relax_mask, apply_mask });
+  // Always store an alert, even if percentChange is 0
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const existing = await Alert.findOne({
+    plotId,
+    type: result.type || "vegetation_loss",
+    severity: result.severity || "medium",
+    percentChange: result.percentChange || 0,
+    source: 'manual',
+    createdAt: { $gte: since }
+  });
+  if (!existing) {
+    const alert = await Alert.create({
       plotId,
       type: result.type || "vegetation_loss",
       severity: result.severity || "medium",
       percentChange: result.percentChange || 0,
       source: 'manual',
-      createdAt: { $gte: since }
+      status: 'unread',
+      title: 'Change Detection',
+      description: 'Manual detection run'
     });
-    if (!existing) {
-      const alert = await Alert.create({
-        plotId,
-        type: result.type || "vegetation_loss",
-        severity: result.severity || "medium",
-        percentChange: result.percentChange || 0,
-        source: 'manual'
-      });
-      await Plot.findByIdAndUpdate(plotId, { $push: { alerts: alert._id } });
-    }
+    await Plot.findByIdAndUpdate(plotId, { $push: { alerts: alert._id } });
   }
   res.json(result);
 };
