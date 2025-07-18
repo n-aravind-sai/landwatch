@@ -3,8 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Trash2, Eye, Download } from 'lucide-react';
+import { Trash2, Eye, Download, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useNavigate } from 'react-router-dom';
 
 interface Plot {
   id: string;
@@ -22,6 +23,9 @@ const AllPlots = () => {
   const [mlLoading, setMlLoading] = useState(false);
   const [mlError, setMlError] = useState('');
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const [detectingPlotId, setDetectingPlotId] = useState<string | null>(null);
+  const [lastDetections, setLastDetections] = useState<Record<string, { time: string; percentChange: number; severity: string }>>({});
 
   // Helper to convert [lat, lng] to GeoJSON [[[lng, lat], ...]]
   function toGeoJsonPolygon(coords: [number, number][]) {
@@ -52,6 +56,31 @@ const AllPlots = () => {
       }
     };
     fetchPlots();
+  }, []);
+
+  // Fetch last detection info for each plot (from alerts API)
+  useEffect(() => {
+    const fetchLastDetections = async () => {
+      try {
+        const token = localStorage.getItem('landwatch_token');
+        const res = await fetch('/api/alerts', { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        const byPlot: Record<string, { time: string; percentChange: number; severity: string }> = {};
+        data.forEach((alert: any) => {
+          if (alert.type === 'change') {
+            if (!byPlot[alert.plotId] || new Date(alert.timestamp) > new Date(byPlot[alert.plotId].time)) {
+              byPlot[alert.plotId] = {
+                time: alert.timestamp,
+                percentChange: alert.percentChange ?? 0,
+                severity: alert.severity
+              };
+            }
+          }
+        });
+        setLastDetections(byPlot);
+      } catch {}
+    };
+    fetchLastDetections();
   }, []);
 
   const handleDelete = (plot: Plot) => {
@@ -147,6 +176,35 @@ const AllPlots = () => {
     }
   };
 
+  const handleManualDetect = async (plot: Plot) => {
+    setDetectingPlotId(plot.id);
+    try {
+      const token = localStorage.getItem('landwatch_token');
+      const res = await fetch(`/api/plots/${plot.id}/detect-change`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(data.message || `Change detected: ${data.percentChange}%`);
+        // Optionally refresh last detections
+        const newLast = { ...lastDetections };
+        newLast[plot.id] = {
+          time: new Date().toISOString(),
+          percentChange: data.percentChange ?? 0,
+          severity: data.alert?.severity || 'low'
+        };
+        setLastDetections(newLast);
+      } else {
+        alert(data.message || 'Failed to detect change');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to detect change');
+    } finally {
+      setDetectingPlotId(null);
+    }
+  };
+
   if (loading) return <div>Loading...</div>;
   if (error) return <div className="text-red-500">{error}</div>;
 
@@ -168,6 +226,9 @@ const AllPlots = () => {
                   <Button variant="outline" size="icon" onClick={() => handleDownloadLatestImage(plot)} title="Download Latest Image">
                     <Download className="h-5 w-5" />
                   </Button>
+                  <Button variant="outline" size="icon" onClick={() => handleManualDetect(plot)} disabled={!!detectingPlotId} title="Manual Detect Change">
+                    {detectingPlotId === plot.id ? <span className="animate-spin">⏳</span> : <AlertTriangle className="h-5 w-5" />}
+                  </Button>
                   <Button variant="ghost" size="icon" onClick={() => handleDelete(plot)} className="text-destructive hover:text-destructive">
                     <Trash2 className="h-5 w-5" />
                   </Button>
@@ -183,6 +244,23 @@ const AllPlots = () => {
                       Lat: {lat}, Lng: {lng}
                     </div>
                   ))}
+                </div>
+                <div className="mt-2 text-xs">
+                  <span className="font-semibold">Last Detection:</span>{' '}
+                  {lastDetections[plot.id] ? (
+                    <span>
+                      {new Date(lastDetections[plot.id].time).toLocaleString()} —
+                      {lastDetections[plot.id].percentChange}%
+                      <Badge variant={lastDetections[plot.id].severity === 'high' ? 'destructive' : lastDetections[plot.id].severity === 'medium' ? 'secondary' : 'outline'} className="ml-2">
+                        {lastDetections[plot.id].severity}
+                      </Badge>
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground">No detection yet</span>
+                  )}
+                  <Button variant="link" size="sm" className="ml-2 p-0 h-auto text-xs" onClick={() => navigate(`/alerts?plot=${plot.id}`)}>
+                    View History
+                  </Button>
                 </div>
               </CardContent>
             </Card>
