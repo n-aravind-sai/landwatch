@@ -2,21 +2,33 @@ import dotenv from "dotenv";
 dotenv.config();
 import Document from "../models/Document.js";
 import Plot from "../models/Plot.js";
-import mongoose from "mongoose";
-import { GridFsStorage } from "multer-gridfs-storage";
-import multer from "multer";
+import AWS from 'aws-sdk';
+import multer from 'multer';
+import multerS3 from 'multer-s3';
 
-// Setup GridFS storage
-const storage = new GridFsStorage({
-  url: process.env.MONGO_URI,
-  file: (req, file) => {
-    return {
-      filename: file.originalname,
-      bucketName: "documents"
-    };
+// Configure AWS SDK
+AWS.config.update({
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  region: process.env.AWS_REGION,
+});
+
+const s3 = new AWS.S3();
+
+export const upload = multer({
+  storage: multerS3({
+    s3,
+    bucket: process.env.AWS_S3_BUCKET,
+    acl: 'private', // or 'public-read' if you want public files
+    key: (req, file, cb) => {
+      cb(null, Date.now() + '-' + file.originalname);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    // Add file validation if needed
+    cb(null, true);
   }
 });
-export const upload = multer({ storage });
 
 export const uploadDocument = async (req, res) => {
   const { plotId, type, description } = req.body;
@@ -29,8 +41,8 @@ export const uploadDocument = async (req, res) => {
   const doc = await Document.create({
     plotId,
     userId: req.user._id,
-    fileName: req.file.filename,
-    fileUrl: req.file.id, // GridFS file id
+    fileName: req.file.originalname,
+    fileUrl: req.file.location, // S3 file URL
     type,
     description
   });
@@ -55,16 +67,12 @@ export const deleteDocument = async (req, res) => {
   if (!doc) return res.status(404).json({ message: "Document not found" });
   if (!doc.userId.equals(req.user._id)) return res.status(403).json({ message: "Unauthorized" });
 
-  // Delete from GridFS
-  const conn = mongoose.connection;
-  const bucket = new mongoose.mongo.GridFSBucket(conn.db, { bucketName: "documents" });
+  // Delete from S3
+  const s3Key = doc.fileUrl.split('/').slice(-1)[0];
   try {
-    await bucket.delete(new mongoose.Types.ObjectId(doc.fileUrl));
+    await s3.deleteObject({ Bucket: process.env.AWS_S3_BUCKET, Key: s3Key }).promise();
   } catch (err) {
-    // If file is already gone, continue
-    if (err.code !== 'ENOENT') {
-      return res.status(500).json({ message: 'Failed to delete file', error: err.message });
-    }
+    return res.status(500).json({ message: 'Failed to delete file from S3', error: err.message });
   }
   await doc.deleteOne();
   res.json({ message: "Document deleted" });
@@ -75,9 +83,37 @@ export const downloadDocument = async (req, res) => {
   if (!doc) return res.status(404).json({ message: "Document not found" });
   if (!doc.userId.equals(req.user._id)) return res.status(403).json({ message: "Unauthorized" });
 
-  const conn = mongoose.connection;
-  const bucket = new mongoose.mongo.GridFSBucket(conn.db, { bucketName: "documents" });
-  res.set('Content-Type', 'application/octet-stream');
-  res.set('Content-Disposition', `attachment; filename=\"${doc.fileName}\"`);
-  bucket.openDownloadStream(new mongoose.Types.ObjectId(doc.fileUrl)).pipe(res);
+  // Generate a signed URL for download
+  const params = {
+    Bucket: process.env.AWS_S3_BUCKET,
+    Key: doc.fileUrl.split('/').slice(-1)[0],
+    Expires: 60, // URL valid for 60 seconds
+    ResponseContentDisposition: `attachment; filename=\"${doc.fileName}\"`
+  };
+  try {
+    const url = s3.getSignedUrl('getObject', params);
+    res.redirect(url);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to generate download URL', error: err.message });
+  }
+};
+
+export const viewDocument = async (req, res) => {
+  const doc = await Document.findById(req.params.docId);
+  if (!doc) return res.status(404).json({ message: "Document not found" });
+  if (!doc.userId.equals(req.user._id)) return res.status(403).json({ message: "Unauthorized" });
+
+  const s3Key = doc.fileUrl.split('/').slice(-1)[0];
+  const params = {
+    Bucket: process.env.AWS_S3_BUCKET,
+    Key: s3Key,
+    Expires: 60, // URL valid for 60 seconds
+    ResponseContentDisposition: `inline; filename=\"${doc.fileName}\"`
+  };
+  try {
+    const url = s3.getSignedUrl('getObject', params);
+    res.redirect(url);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to generate view URL', error: err.message });
+  }
 }; 

@@ -536,6 +536,17 @@ const Documents = () => {
                             Download
                           </Button>
                         )}
+                        {doc._id && (
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="flex-1"
+                            onClick={() => window.open(`/api/documents/view/${doc._id}`, '_blank')}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                        )}
                         <Button variant="outline" size="sm" onClick={() => handleDelete(doc)} className="text-destructive hover:text-destructive">
                           <Trash2 className="h-3 w-3" />
                         </Button>
