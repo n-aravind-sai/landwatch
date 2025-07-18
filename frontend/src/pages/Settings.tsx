@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,10 +13,10 @@ import { User, Bell, Shield, Globe, Palette, HardDrive } from 'lucide-react';
 const Settings = () => {
   const { toast } = useToast();
   const [profile, setProfile] = useState({
-    name: 'John Doe',
-    email: 'john.doe@example.com',
-    organization: 'LandWatch Corp',
-    phone: '+1 (555) 123-4567'
+    name: '',
+    email: '',
+    organization: '',
+    phone: ''
   });
 
   const [notifications, setNotifications] = useState({
@@ -34,11 +34,48 @@ const Settings = () => {
     units: 'metric'
   });
 
-  const handleSaveProfile = () => {
-    toast({
-      title: "Profile updated",
-      description: "Your profile information has been saved successfully."
-    });
+  useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const token = localStorage.getItem('landwatch_token');
+        const res = await fetch('/api/auth/profile', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setProfile({
+            name: data.name || '',
+            email: data.email || '',
+            organization: data.organization || '',
+            phone: data.phone || ''
+          });
+        }
+      } catch (err) {
+        toast({ title: 'Failed to load profile', variant: 'destructive' });
+      }
+    };
+    fetchProfile();
+  }, [toast]);
+
+  const handleSaveProfile = async () => {
+    try {
+      const token = localStorage.getItem('landwatch_token');
+      const res = await fetch('/api/auth/profile', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify(profile)
+      });
+      if (res.ok) {
+        toast({ title: "Profile updated", description: "Your profile information has been saved successfully." });
+      } else {
+        toast({ title: "Update failed", description: "Could not update profile.", variant: "destructive" });
+      }
+    } catch (err) {
+      toast({ title: "Update failed", description: "Could not update profile.", variant: "destructive" });
+    }
   };
 
   const handleSaveNotifications = () => {

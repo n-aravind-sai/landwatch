@@ -265,7 +265,7 @@ const Alerts = () => {
           <div className="mb-8">
             <Card>
               <CardHeader>
-                <CardTitle>Daily Data (Automated & Manual Detection)</CardTitle>
+                <CardTitle>Daily Data </CardTitle>
               </CardHeader>
               <CardContent>
                 {Object.values(dailyDataByPlot).length === 0 ? (
