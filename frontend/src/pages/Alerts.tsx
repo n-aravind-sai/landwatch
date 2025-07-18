@@ -193,7 +193,7 @@ const Alerts = () => {
   });
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="monitoring-bg min-h-screen">
       {/* Header */}
       <div className="bg-card border-b border-border p-6">
         <div className="flex items-center justify-between mb-6">

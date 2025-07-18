@@ -9,7 +9,7 @@
 @layer base {
   :root {
     /* Core brand colors - satellite blues and earth greens */
-    --background: 0 0% 100%;
+    --background: 217 60% 98%; /* subtle blue-tinted background */
     --foreground: 215 25% 27%;
 
     --card: 0 0% 100%;
@@ -81,7 +81,7 @@
     --background: 222.2 84% 4.9%;
     --foreground: 210 40% 98%;
 
-    --card: 222.2 84% 4.9%;
+    --card: 222.2 84% 7.5%; /* slightly lighter for card in dark mode */
     --card-foreground: 210 40% 98%;
 
     --popover: 222.2 84% 4.9%;
@@ -197,5 +197,10 @@
   @keyframes orbit {
     from { transform: rotate(0deg) translateX(100px) rotate(0deg); }
     to { transform: rotate(360deg) translateX(100px) rotate(-360deg); }
+  }
+
+  /* Monitoring dashboard background utility */
+  .monitoring-bg {
+    background: linear-gradient(135deg, hsl(217 91% 98%), hsl(142 76% 96%) 100%);
   }
 }
