@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, Polygon, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Polygon, useMapEvents, useMap, Marker, Popup } from 'react-leaflet';
 import { Plus, Save, X, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -47,6 +47,30 @@ function GeocoderControl() {
     }
   }, [map]);
   return null;
+}
+
+// Shoelace formula for area in square meters (approx, assumes small area)
+function polygonArea(coords: [number, number][]) {
+  if (coords.length < 3) return 0;
+  // Convert lat/lng to meters using equirectangular projection (approx)
+  const R = 6378137; // Earth radius in meters
+  const toRad = (deg: number) => deg * Math.PI / 180;
+  const [lat0, lng0] = coords[0];
+  const xy = coords.map(([lat, lng]) => {
+    const x = R * toRad(lng - lng0) * Math.cos(toRad(lat0));
+    const y = R * toRad(lat - lat0);
+    return [x, y];
+  });
+  let area = 0;
+  for (let i = 0; i < xy.length; i++) {
+    const [x1, y1] = xy[i];
+    const [x2, y2] = xy[(i + 1) % xy.length];
+    area += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(area / 2); // in m^2
+}
+function metersToAcres(m2: number) {
+  return m2 / 4046.85642;
 }
 
 const MapView = () => {
@@ -137,15 +161,30 @@ const MapView = () => {
     setDrawCoords([]);
   };
 
+  const cancelDrawing = () => {
+    setIsAddingPlot(false);
+    setDrawing(false);
+    setDrawCoords([]);
+    setNewPlot({ name: '', coordinates: [] });
+    setStep('name');
+  };
+
   const finishDrawing = async () => {
-    if (drawCoords.length < 3) {
+    let coords = drawCoords;
+    if (coords.length < 3) {
       toast({ title: 'Need at least 3 points', variant: 'destructive' });
       return;
+    }
+    // Close polygon if not closed
+    if (coords[0][0] !== coords[coords.length-1][0] || coords[0][1] !== coords[coords.length-1][1]) {
+      coords = [...coords, coords[0]];
     }
     setDrawing(false);
     setStep('name');
     try {
       setLoading(true);
+      const areaM2 = polygonArea(coords);
+      const areaAcres = metersToAcres(areaM2);
       const token = localStorage.getItem('landwatch_token');
       const res = await fetch('/api/plots', {
         method: 'POST',
@@ -153,7 +192,7 @@ const MapView = () => {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ name: newPlot.name, coordinates: drawCoords })
+        body: JSON.stringify({ name: newPlot.name, coordinates: coords, area: areaAcres })
       });
       if (!res.ok) {
         const data = await res.json();
@@ -201,8 +240,14 @@ const MapView = () => {
           ))}
           {/* Drawing Polygon */}
           {drawing && drawCoords.length > 0 && (
-            <Polygon positions={drawCoords} pathOptions={{ color: 'purple', dashArray: '5,5' }} />
+            <Polygon positions={[...drawCoords, drawCoords[0]]} pathOptions={{ color: 'purple', dashArray: '5,5' }} />
           )}
+          {/* Show Markers for each point while drawing */}
+          {drawing && drawCoords.map(([lat, lng], idx) => (
+            <Marker key={idx} position={[lat, lng]} icon={L.divIcon({ className: 'bg-green-500 rounded-full', iconSize: [12, 12] })}>
+              <Popup>Point {idx + 1}</Popup>
+            </Marker>
+          ))}
         </MapContainer>
         {/* Add Plot Name Dialog */}
           <Dialog open={isAddingPlot} onOpenChange={(open) => { if (!open) setIsAddingPlot(false); }}>
@@ -244,16 +289,16 @@ const MapView = () => {
                 <div key={idx}>Lat: {lat.toFixed(6)}, Lng: {lng.toFixed(6)}</div>
               ))}
             </div>
+            <div className="text-xs text-muted-foreground mb-2">
+              Area: {drawCoords.length >= 3 ? metersToAcres(polygonArea([...drawCoords, drawCoords[0]])).toFixed(2) : '0.00'} acres
+            </div>
             <div className="flex space-x-2">
               <Button onClick={finishDrawing} disabled={drawCoords.length < 3} className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 flex-1">
                 <Save className="h-4 w-4 mr-2" /> Save Plot
               </Button>
-              <Button variant="outline" onClick={() => { setDrawing(false); setDrawCoords([]); setNewPlot({ name: '', coordinates: [] }); }}>
-                <X className="h-4 w-4" /> Cancel
+              <Button variant="outline" onClick={cancelDrawing}>
+                <X className="h-4 w-4 mr-2" /> Cancel
               </Button>
-            </div>
-            <div className="text-xs text-muted-foreground mt-2">
-              Draw your plot by clicking at least 3 points on the map. Then click "Save Plot".
             </div>
           </div>
         )}

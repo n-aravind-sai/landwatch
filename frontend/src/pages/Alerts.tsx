@@ -197,16 +197,11 @@ const Alerts = () => {
       if (!dailyDataByPlot[alert.plotName]) {
         dailyDataByPlot[alert.plotName] = { plotName: alert.plotName, data: [] };
       }
-      // Determine source (manual or automated) if possible
-      // If you have a field, use it; otherwise, fallback to description or status
-      let source = 'Automated';
-      if (alert.description && alert.description.toLowerCase().includes('manual')) {
-        source = 'Manual';
-      }
-      // Optionally, if you add a 'source' field to alerts, use that
+      // Use the source field directly
+      const source = alert.source === 'manual' ? 'Manual' : 'Automated';
       dailyDataByPlot[alert.plotName].data.push({
         date,
-        percentChange: (alert as any).percentChange ?? 0,
+        percentChange: alert.percentChange ?? 0,
         severity: alert.severity,
         source,
       });
