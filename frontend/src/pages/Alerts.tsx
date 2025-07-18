@@ -168,6 +168,30 @@ const Alerts = () => {
   const unreadCount = alerts.filter(alert => alert.status === 'unread').length;
   const highPriorityCount = alerts.filter(alert => alert.severity === 'high').length;
 
+  // Group alerts by plot and date for daily data (include both automated and manual 'change' alerts)
+  const dailyDataByPlot: Record<string, { plotName: string; data: { date: string; percentChange: number; severity: string; source: string }[] }> = {};
+  alerts.forEach(alert => {
+    if (alert.type === 'change') {
+      const date = new Date(alert.timestamp).toLocaleDateString();
+      if (!dailyDataByPlot[alert.plotName]) {
+        dailyDataByPlot[alert.plotName] = { plotName: alert.plotName, data: [] };
+      }
+      // Determine source (manual or automated) if possible
+      // If you have a field, use it; otherwise, fallback to description or status
+      let source = 'Automated';
+      if (alert.description && alert.description.toLowerCase().includes('manual')) {
+        source = 'Manual';
+      }
+      // Optionally, if you add a 'source' field to alerts, use that
+      dailyDataByPlot[alert.plotName].data.push({
+        date,
+        percentChange: (alert as any).percentChange ?? 0,
+        severity: alert.severity,
+        source,
+      });
+    }
+  });
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -236,7 +260,51 @@ const Alerts = () => {
             <TabsTrigger value="timeline">Timeline View</TabsTrigger>
             <TabsTrigger value="summary">Summary</TabsTrigger>
           </TabsList>
-          
+
+          {/* Daily Data Section (shared for both views) */}
+          <div className="mb-8">
+            <Card>
+              <CardHeader>
+                <CardTitle>Daily Data (Automated & Manual Detection)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.values(dailyDataByPlot).length === 0 ? (
+                  <div className="text-muted-foreground text-sm">No daily data available.</div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {Object.values(dailyDataByPlot).map(plotData => (
+                      <Card key={plotData.plotName} className="border border-border">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-base">{plotData.plotName}</CardTitle>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <ul className="text-xs text-muted-foreground">
+                            {plotData.data
+                              .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                              .map((entry, idx) => (
+                                <li key={idx} className="flex justify-between items-center py-1 border-b last:border-b-0">
+                                  <span>{entry.date}</span>
+                                  <span>
+                                    {entry.percentChange}%{' '}
+                                    <Badge variant={entry.severity === 'high' ? 'destructive' : entry.severity === 'medium' ? 'secondary' : 'outline'}>
+                                      {entry.severity}
+                                    </Badge>
+                                    <span className="ml-2 text-[10px] px-2 py-0.5 rounded bg-muted-foreground/10 text-muted-foreground">
+                                      {entry.source}
+                                    </span>
+                                  </span>
+                                </li>
+                              ))}
+                          </ul>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
           <TabsContent value="timeline" className="space-y-4">
             {loading ? (
               <Card>
@@ -335,7 +403,7 @@ const Alerts = () => {
             )}
           </TabsContent>
           
-          <TabsContent value="summary">
+          <TabsContent value="summary" className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               <Card className="feature-card">
                 <CardContent className="p-6">
@@ -411,37 +479,37 @@ const Alerts = () => {
             </Card>
           </TabsContent>
         </Tabs>
-      </div>
-      <Dialog open={detectDialogOpen} onOpenChange={setDetectDialogOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Detect Change</DialogTitle>
-            <DialogDescription>
-              Select a plot to run change detection. This will call the ML service and create an alert if significant change is found.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <Select value={selectedPlotId} onValueChange={setSelectedPlotId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select plot" />
-              </SelectTrigger>
-              <SelectContent>
-                {plots.map(plot => (
-                  <SelectItem key={plot.id} value={plot.id}>{plot.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <div className="flex space-x-2 pt-4">
-              <Button onClick={handleDetectChange} disabled={!selectedPlotId || detectLoading} className="btn-earth flex-1">
-                {detectLoading ? 'Detecting...' : 'Detect Change'}
-              </Button>
-              <Button variant="outline" onClick={() => setDetectDialogOpen(false)}>
-                Cancel
-              </Button>
+        <Dialog open={detectDialogOpen} onOpenChange={setDetectDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Detect Change</DialogTitle>
+              <DialogDescription>
+                Select a plot to run change detection. This will call the ML service and create an alert if significant change is found.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <Select value={selectedPlotId} onValueChange={setSelectedPlotId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select plot" />
+                </SelectTrigger>
+                <SelectContent>
+                  {plots.map(plot => (
+                    <SelectItem key={plot.id} value={plot.id}>{plot.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex space-x-2 pt-4">
+                <Button onClick={handleDetectChange} disabled={!selectedPlotId || detectLoading} className="btn-earth flex-1">
+                  {detectLoading ? 'Detecting...' : 'Detect Change'}
+                </Button>
+                <Button variant="outline" onClick={() => setDetectDialogOpen(false)}>
+                  Cancel
+                </Button>
+              </div>
             </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   );
 };
