@@ -6,7 +6,8 @@ const alertSchema = new mongoose.Schema(
     timestamp: { type: Date, default: Date.now },
     type: { type: String, required: true },
     severity: { type: String, required: true },
-    percentChange: { type: Number }
+    percentChange: { type: Number },
+    source: { type: String, required: true, enum: ['manual', 'automated'] }
   },
   { timestamps: true }
 );

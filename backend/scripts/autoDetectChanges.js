@@ -44,22 +44,46 @@ async function run() {
       else if (percentChange > 15) severity = 'medium';
       else if (percentChange > 5) severity = 'low';
       else continue;
-      const alert = await Alert.create({
+      // Deduplication: check for similar alert in last 24h
+      const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      const existing = await Alert.findOne({
         plotId: plot._id,
-        timestamp: new Date(),
         type: 'change',
         severity,
-        percentChange
+        percentChange,
+        source: 'automated',
+        createdAt: { $gte: since }
       });
-      // Fetch user email
-      const user = await User.findById(plot.userId);
-      if (user && user.email) {
-        await sendAlertEmail(user.email, plot.name, percentChange, severity);
-        console.log(`Alert email sent to ${user.email} for plot ${plot.name}`);
+      if (!existing) {
+        const alert = await Alert.create({
+          plotId: plot._id,
+          timestamp: new Date(),
+          type: 'change',
+          severity,
+          percentChange,
+          source: 'automated'
+        });
+        // Fetch user email
+        const user = await User.findById(plot.userId);
+        if (user && user.email) {
+          await sendAlertEmail(user.email, plot.name, percentChange, severity);
+          console.log(`Alert email sent to ${user.email} for plot ${plot.name}`);
+        }
+        console.log(`Alert created for plot ${plot._id} with severity ${severity} (${percentChange}%)`);
       }
-      console.log(`Alert created for plot ${plot._id} with severity ${severity} (${percentChange}%)`);
     } catch (err) {
       console.error(`Failed to process plot ${plot._id}:`, err.message);
+      // Send admin notification on error
+      try {
+        await transporter.sendMail({
+          from: process.env.SMTP_FROM || 'alerts@landwatch.com',
+          to: process.env.ADMIN_EMAIL || 'admin@landwatch.com',
+          subject: `Landwatch Cron Failure: Plot ${plot._id}`,
+          text: `Failed to process plot ${plot._id}: ${err.message}`,
+        });
+      } catch (emailErr) {
+        console.error('Failed to send admin notification:', emailErr.message);
+      }
     }
   }
   await mongoose.disconnect();
