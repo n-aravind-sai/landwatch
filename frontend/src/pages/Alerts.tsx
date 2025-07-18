@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 
 interface Alert {
   id: string;
@@ -19,6 +21,12 @@ interface Alert {
   coordinates?: string;
 }
 
+interface Plot {
+  id: string;
+  name: string;
+  coordinates: [number, number][];
+}
+
 const Alerts = () => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +34,11 @@ const Alerts = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSeverity, setSelectedSeverity] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
+  const { toast } = useToast();
+  const [plots, setPlots] = useState<Plot[]>([]);
+  const [detectDialogOpen, setDetectDialogOpen] = useState(false);
+  const [selectedPlotId, setSelectedPlotId] = useState<string>('');
+  const [detectLoading, setDetectLoading] = useState(false);
 
   useEffect(() => {
     const fetchAlerts = async () => {
@@ -42,6 +55,24 @@ const Alerts = () => {
       }
     };
     fetchAlerts();
+  }, []);
+
+  useEffect(() => {
+    const fetchPlots = async () => {
+      try {
+        const token = localStorage.getItem('landwatch_token');
+        const res = await fetch('/api/plots', { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        setPlots((data as { _id: string; name: string; coordinates: [number, number][] }[]).map(plot => ({
+          id: plot._id,
+          name: plot.name,
+          coordinates: plot.coordinates,
+        })));
+      } catch (err) {
+        // ignore
+      }
+    };
+    fetchPlots();
   }, []);
 
   const filteredAlerts = alerts.filter(alert => {
@@ -102,6 +133,38 @@ const Alerts = () => {
     console.log('Resolving alert:', alertId);
   };
 
+  const handleDetectChange = async () => {
+    if (!selectedPlotId) return;
+    setDetectLoading(true);
+    try {
+      const token = localStorage.getItem('landwatch_token');
+      const res = await fetch(`/api/plots/${selectedPlotId}/detect-change`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok) {
+        toast({ title: 'Change Detection', description: data.message || `Change detected: ${data.percentChange}%`, variant: data.alert ? 'default' : 'secondary' });
+        setDetectDialogOpen(false);
+        setSelectedPlotId('');
+        // Optionally refresh alerts
+        if (data.alert) {
+          // re-fetch alerts
+          const token = localStorage.getItem('landwatch_token');
+          const res = await fetch('/api/alerts', { headers: { Authorization: `Bearer ${token}` } });
+          const data = await res.json();
+          setAlerts(data);
+        }
+      } else {
+        toast({ title: 'Change Detection Failed', description: data.message || 'Failed to detect change', variant: 'destructive' });
+      }
+    } catch (err: any) {
+      toast({ title: 'Change Detection Error', description: err.message || 'Failed to detect change', variant: 'destructive' });
+    } finally {
+      setDetectLoading(false);
+    }
+  };
+
   const unreadCount = alerts.filter(alert => alert.status === 'unread').length;
   const highPriorityCount = alerts.filter(alert => alert.severity === 'high').length;
 
@@ -123,6 +186,9 @@ const Alerts = () => {
               </Badge>
             </div>
           </div>
+          <Button onClick={() => setDetectDialogOpen(true)} variant="earth">
+            Detect Change
+          </Button>
         </div>
 
         {/* Filters */}
@@ -346,6 +412,36 @@ const Alerts = () => {
           </TabsContent>
         </Tabs>
       </div>
+      <Dialog open={detectDialogOpen} onOpenChange={setDetectDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Detect Change</DialogTitle>
+            <DialogDescription>
+              Select a plot to run change detection. This will call the ML service and create an alert if significant change is found.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <Select value={selectedPlotId} onValueChange={setSelectedPlotId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select plot" />
+              </SelectTrigger>
+              <SelectContent>
+                {plots.map(plot => (
+                  <SelectItem key={plot.id} value={plot.id}>{plot.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex space-x-2 pt-4">
+              <Button onClick={handleDetectChange} disabled={!selectedPlotId || detectLoading} className="btn-earth flex-1">
+                {detectLoading ? 'Detecting...' : 'Detect Change'}
+              </Button>
+              <Button variant="outline" onClick={() => setDetectDialogOpen(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

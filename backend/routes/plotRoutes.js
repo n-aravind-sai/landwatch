@@ -5,7 +5,8 @@ import {
   createPlot,
   getPlotById,
   updatePlot,
-  deletePlot
+  deletePlot,
+  detectChangeForPlot
 } from "../controllers/plotController.js";
 
 const router = express.Router();
@@ -16,5 +17,6 @@ router.post("/", createPlot);
 router.get("/:id", getPlotById);
 router.put("/:id", updatePlot);
 router.delete("/:id", deletePlot);
+router.post('/:plotId/detect-change', auth, detectChangeForPlot);
 
 export default router; 
