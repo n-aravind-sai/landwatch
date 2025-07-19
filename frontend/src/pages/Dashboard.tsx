@@ -81,7 +81,7 @@ const Dashboard = () => {
 
   // Example stats (replace with real calculations as needed)
   const totalPlots = plots.length;
-  const totalArea = plots.reduce((sum, plot) => sum + (plot.area || 0), 0);
+  const totalArea = Math.round(plots.reduce((sum, plot) => sum + (plot.area || 0), 0) * 100) / 100; // Round to 2 decimal places
   const alertsLast30Days = alerts.filter(alert => {
     const alertDate = new Date(alert.timestamp || alert.date);
     const thirtyDaysAgo = new Date();

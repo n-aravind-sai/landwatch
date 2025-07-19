@@ -1,6 +1,5 @@
 import dotenv from "dotenv";
 dotenv.config();
-console.log("MONGO_URI:", process.env.MONGO_URI);
 import express from "express";
 import cors from "cors";
 import morgan from "morgan";
@@ -14,9 +13,6 @@ import alertRoutes from "./routes/alertRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
 import mlRoutes from "./routes/mlRoutes.js";
 
-dotenv.config();
-console.log('DEBUG: DB_URI is', process.env.MONGO_URI);
-console.log('DEBUG: ML_SERVICE_URL is', process.env.ML_SERVICE_URL);
 connectDB();
 const app = express();
 
