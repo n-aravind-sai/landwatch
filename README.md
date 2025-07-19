@@ -32,7 +32,7 @@ Landwatch is a full-stack land monitoring platform that enables users to monitor
 
 ### 1. Clone the Repository
 ```sh
-git clone <YOUR_GIT_URL>
+git clone https://github.com/n-aravind-sai/landwatch.git
 cd landwatch
 ```
 
